@@ -1,0 +1,3 @@
+# Require DevOps team to review CI/CD
+.github/workflows/  @devops-team
+
