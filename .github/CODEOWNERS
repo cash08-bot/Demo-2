@@ -1,4 +1,4 @@
 * @cash08-bot
 # Require DevOps team to review CI/CD
-.github/workflows/  @devops-team
+# .github/workflows/  @devops-team
 
