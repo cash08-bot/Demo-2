@@ -17,8 +17,8 @@ public class CdktestStack extends Stack {
         // The code that defines your stack goes here
 
         // example resource
-        // final Queue queue = Queue.Builder.create(this, "CdktestQueue")
-        //         .visibilityTimeout(Duration.seconds(300))
-        //         .build();
+        final Queue queue = Queue.Builder.create(this, "CdktestQueue")
+                .visibilityTimeout(Duration.seconds(300))
+                .build();
     }
 }
