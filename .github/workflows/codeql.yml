@@ -28,8 +28,6 @@ jobs:
         with:
           languages: ${{ matrix.language }}
 
-      - name: Build with Maven Wrapper
-        run: ./mvnw install
-
+     
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v2
