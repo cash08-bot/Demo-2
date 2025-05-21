@@ -5,31 +5,35 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   analyze:
-    name: Analyze
     runs-on: ubuntu-latest
-
-    permissions:
-      security-events: write
-
-    strategy:
-      matrix:
-        language: [ java ]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Maven
+        uses: s4u/setup-maven-action@v1.11.0
+        with:
+          maven-version: '3.9.6'
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v2
         with:
-          languages: ${{ matrix.language }}
+          languages: java
 
-      - name: Build with Maven Wrapper
-        run: ./mvnw install
+      - name: Build project
+        run: mvn compile
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v2
+
+
