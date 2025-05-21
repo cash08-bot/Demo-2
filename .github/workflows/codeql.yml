@@ -28,7 +28,7 @@ jobs:
           languages: ${{ matrix.language }}
 
       - name: Build with Maven Wrapper
-        run: ./mvnw compile
+        run: ./mvn compile
 
       - name: Debug compiled classes
         run: find . -name "*.class"
