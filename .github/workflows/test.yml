@@ -1,0 +1,30 @@
+name: Zip and upload CDK code to S3
+
+on:
+  push:
+    branches:
+      - main  # Change to your branch if needed
+
+jobs:
+  zip-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Zip the entire project
+        run: |
+          zip -r cdk-project.zip . -x ".git/*" ".github/*" "target/*" "cdk.out/*"
+          ls -lh cdk-project.zip
+
+      - name: Upload zip to S3 bucket
+        run: |
+          aws s3 cp cdk-project.zip s3://test-1-git/
