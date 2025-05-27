@@ -42,7 +42,7 @@ jobs:
 
       - name: Zip the CDK project
         run: |
-          zip -r cdk-project.zip . -x ".git/*" ".github/*" "cdk.out/*" "target/*"
+          zip -r cdk-project.zip . -x ".git/*" ".github/*" 
           ls -lh cdk-project.zip
 
       - name: Upload to S3
