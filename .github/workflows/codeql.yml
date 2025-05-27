@@ -1,12 +1,12 @@
-name: Zip and upload CDK code to S3
+name: Java CDK Synth, Zip, and Upload to S3
 
 on:
   push:
     branches:
-      - main  # Change to your branch if needed
+      - main  # Change to your target branch
 
 jobs:
-  zip-and-upload:
+  synth-zip-upload:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,11 +20,29 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Zip the entire project
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17' # or '11' based on your CDK project
+          distribution: 'temurin'
+
+      - name: Set up CDK
         run: |
-          zip -r cdk-project.zip . -x ".git/*" ".github/*" "target/*" "cdk.out/*"
+          npm install -g aws-cdk
+
+      - name: Build Java project
+        run: |
+          mvn clean install
+
+      - name: Run CDK synth
+        run: |
+          cdk synth
+
+      - name: Zip the CDK project
+        run: |
+          zip -r cdk-project.zip . -x ".git/*" ".github/*" "cdk.out/*" "target/*"
           ls -lh cdk-project.zip
 
-      - name: Upload zip to S3 bucket
+      - name: Upload to S3
         run: |
           aws s3 cp cdk-project.zip s3://test-1-git/
