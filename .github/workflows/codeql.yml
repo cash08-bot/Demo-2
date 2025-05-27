@@ -1,39 +1,49 @@
-name: CodeQL
+name: Java CDK Synth, Zip, and Upload to S3
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main  # Change to your target branch if different
 
 jobs:
-  analyze:
+  synth-zip-upload:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Set up Maven
-        uses: s4u/setup-maven-action@v1.11.0
-        with:
-          maven-version: '3.9.6'
+      - name: Set up AWS CDK
+        run: npm install -g aws-cdk
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
-        with:
-          languages: java
+      - name: Build Java CDK project
+        run: mvn clean install
 
-      - name: Build project
-        run: mvn compile
+      - name: Run CDK synth
+        run: cdk synth
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v2
+      - name: Zip the CDK project
+        run: |
+          zip -r cdk-project.zip . -x ".git/*" ".github/*" "cdk.out/*" "target/*"
+          ls -lh cdk-project.zip
 
-
+      - name: Upload zip to S3
+        run: aws s3 cp cdk-project.zip s3://test-1-git/
