@@ -1,56 +1,79 @@
-name: CDK Deploy Pipeline
+name: CDK Deploy & PR Validation Pipeline
 
 on:
   push:
     branches:
       - dev
-      - stg
-      - prod
   pull_request:
     branches:
       - dev
       - stg
       - prod
-
-permissions:
-  contents: read
-  actions: write
-  pull-requests: write
+      - main
 
 jobs:
+  validate-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR Source Branch
+        run: |
+          echo "SOURCE BRANCH: ${{ github.head_ref }}"
+          echo "TARGET BRANCH: ${{ github.base_ref }}"
+
+          if [[ "${{ github.base_ref }}" == "stg" && "${{ github.head_ref }}" != "dev" ]]; then
+            echo "❌ Only 'dev' can raise PRs to 'stg'"
+            exit 1
+          fi
+
+          if [[ "${{ github.base_ref }}" == "prod" && "${{ github.head_ref }}" != "stg" ]]; then
+            echo "❌ Only 'stg' can raise PRs to 'prod'"
+            exit 1
+          fi
+
+          if [[ "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" != "prod" ]]; then
+            echo "❌ Only 'prod' can raise PRs to 'main'"
+            exit 1
+          fi
+
+          echo "✅ PR source branch is valid."
+
   synth-and-upload:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
-    # Run only on these branches
-    if: |
-      (github.ref == 'refs/heads/dev') ||
-      (github.ref == 'refs/heads/stg') ||
-      (github.ref == 'refs/heads/prod')
+    strategy:
+      matrix:
+        include:
+          - branch: dev
+            env_name: dev
+          - branch: stg
+            env_name: stg
+          - branch: prod
+            env_name: prod
+
+    environment: ${{ matrix.env_name }}
 
     env:
+      ENV_ID: ${{ matrix.env_name }}
       AWS_REGION: us-east-1
       BUCKET_NAME: test-1-git
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
     steps:
-      - name: Set environment name
-        run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
-            echo "ENV_ID=dev" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/stg" ]]; then
-            echo "ENV_ID=stg" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/prod" ]]; then
-            echo "ENV_ID=prod" >> $GITHUB_ENV
-          fi
+      - name: Exit if branch does not match matrix branch
+        if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
+        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
 
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials (Access Keys)
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+          aws configure set default.region $AWS_REGION
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -82,6 +105,6 @@ jobs:
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3
+      - name: Upload to S3 bucket ${{ env.BUCKET_NAME }}
         run: |
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
