@@ -3,12 +3,12 @@ name: CDK Deploy Pipeline
 on:
   push:
     branches:
-      - main
+      - prod
       - dev
       - stg
   pull_request:
     branches:
-      - main
+      - prod
       - dev
       - stg
 
@@ -28,7 +28,7 @@ jobs:
             env_name: dev
           - branch: stg
             env_name: stg
-          - branch: main
+          - branch: prod
             env_name: prod
 
     environment: ${{ matrix.env_name }}
