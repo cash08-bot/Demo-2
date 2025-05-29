@@ -1,39 +1,71 @@
-name: Java CDK Synth, Zip, and Upload to S3
+name: CDK Deploy Pipeline
 
 on:
   push:
     branches:
-      - main  # Update if using a different branch
+      - main
+      - dev
+      - stg
+  pull_request:
+    branches:
+      - main
+      - dev
+      - stg
 
 permissions:
-  id-token: write       # Required for OIDC
-  contents: read        # To checkout the repo
+  id-token: write    # Required for OIDC
+  contents: read
+  actions: write
+  pull-requests: write
 
 jobs:
-  synth-zip-upload:
+  synth-and-upload:
     runs-on: ubuntu-latest
-    environment: dev     
+
+    strategy:
+      matrix:
+        include:
+          - branch: dev
+            env_name: dev
+          - branch: stg
+            env_name: stg
+          - branch: main
+            env_name: prod
+
+    if: github.ref == format('refs/heads/{0}', matrix.branch)
+
+    environment: ${{ matrix.env_name }}
+
+    env:
+      ENV_ID: ${{ matrix.env_name }}
+      AWS_REGION: us-east-1
+      BUCKET_NAME: cdk-${{ matrix.env_name }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials from OIDC
-        uses: aws-actions/configure-aws-credentials@v3
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
 
+      - name: Set up Maven
+        uses: s4u/setup-maven-action@v1.11.0
+        with:
+          maven-version: '3.9.6'
+
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
@@ -42,12 +74,13 @@ jobs:
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth
+        run: cdk synth --context env=${{ env.ENV_ID }}
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3
-        run: aws s3 cp cdk-project.zip s3://test-1-git/
+      - name: Upload to S3 bucket ${{ env.BUCKET_NAME }}
+        run: |
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
