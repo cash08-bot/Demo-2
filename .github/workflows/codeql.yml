@@ -3,14 +3,14 @@ name: CDK Deploy Pipeline
 on:
   push:
     branches:
-      - main
       - dev
       - stg
+      - prod
   pull_request:
     branches:
-      - main
       - dev
       - stg
+      - prod
 
 permissions:
   contents: read
@@ -21,32 +21,31 @@ jobs:
   synth-and-upload:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - branch: dev
-            env_name: dev
-          - branch: stg
-            env_name: stg
-          - branch: main
-            env_name: prod
-
-    environment: ${{ matrix.env_name }}
+    # Run only on these branches
+    if: |
+      (github.ref == 'refs/heads/dev') ||
+      (github.ref == 'refs/heads/stg') ||
+      (github.ref == 'refs/heads/prod')
 
     env:
-      ENV_ID: ${{ matrix.env_name }}
       AWS_REGION: us-east-1
       BUCKET_NAME: test-1-git
 
     steps:
-      - name: Exit if branch does not match matrix branch
-        if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
-        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
+      - name: Set environment name
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
+            echo "ENV_ID=dev" >> $GITHUB_ENV
+          elif [[ "${GITHUB_REF}" == "refs/heads/stg" ]]; then
+            echo "ENV_ID=stg" >> $GITHUB_ENV
+          elif [[ "${GITHUB_REF}" == "refs/heads/prod" ]]; then
+            echo "ENV_ID=prod" >> $GITHUB_ENV
+          fi
 
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials (Access Keys)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -83,6 +82,6 @@ jobs:
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket ${{ env.BUCKET_NAME }}
+      - name: Upload to S3
         run: |
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
