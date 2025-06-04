@@ -4,15 +4,14 @@ on:
   push:
     branches:
       - dev
-      - stg
-      - prod
   pull_request:
     branches:
+      - prod
       - dev
       - stg
-      - prod
 
 permissions:
+  id-token: write
   contents: read
   actions: write
   pull-requests: write
@@ -21,35 +20,35 @@ jobs:
   synth-and-upload:
     runs-on: ubuntu-latest
 
-    # Run only on these branches
-    if: |
-      (github.ref == 'refs/heads/dev') ||
-      (github.ref == 'refs/heads/stg') ||
-      (github.ref == 'refs/heads/prod')
+    strategy:
+      matrix:
+        include:
+          - branch: dev
+            env_name: dev
+          - branch: stg
+            env_name: stg
+          - branch: prod
+            env_name: prod
+
+    environment: ${{ matrix.env_name }}
 
     env:
+      ENV_ID: ${{ matrix.env_name }}
       AWS_REGION: us-east-1
       BUCKET_NAME: test-1-git
 
     steps:
-      - name: Set environment name
-        run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
-            echo "ENV_ID=dev" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/stg" ]]; then
-            echo "ENV_ID=stg" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/prod" ]]; then
-            echo "ENV_ID=prod" >> $GITHUB_ENV
-          fi
+      - name: Exit if branch does not match matrix branch
+        if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
+        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
 
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Node.js
@@ -82,6 +81,6 @@ jobs:
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3
+      - name: Upload to S3 bucket ${{ env.BUCKET_NAME }}
         run: |
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
