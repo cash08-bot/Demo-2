@@ -86,5 +86,5 @@ jobs:
 
       - name: Upload to S3 bucket with short commit SHA
         run: |
-          SHORT_SHA=${{github.sha::}}
+          SHORT_SHA=${{github.sha::7}}
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
