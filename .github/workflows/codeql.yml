@@ -50,7 +50,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -84,6 +84,7 @@ jobs:
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket with commit SHA
+      - name: Upload to S3 bucket with short commit SHA
         run: |
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${{ github.sha }}.zip --region ${{ env.AWS_REGION }}
+          SHORT_SHA=${GITHUB_SHA::7}
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
