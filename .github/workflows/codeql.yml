@@ -2,9 +2,15 @@ name: CDK Deploy Pipeline
 
 on:
   push:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
   pull_request:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
 
 permissions:
   id-token: write
@@ -42,9 +48,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -64,18 +70,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install AWS CDK
+      - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: CDK Synth to Template YAML
-        run: |
-          mkdir -p cdk.out
-          cdk synth --context env=${{ env.ENV_ID }} > cdk.out/template.yml
-          cat cdk.out/template.yml
+      - name: Run CDK synth
+        run: cdk synth --context env=${{ env.ENV_ID }}
 
-      - name: Upload Template YAML to S3
+      - name: Zip the CDK project
         run: |
-          aws s3 cp cdk.out/template.yml s3://${{ env.BUCKET_NAME }}/template-${{ env.ENV_ID }}.yml --region ${{ env.AWS_REGION }}
+          zip -r cdk-project.zip . -x ".git/*" ".github/*"
+          ls -lh cdk-project.zip
+
+      - name: Upload to S3 bucket with commit SHA
+        run: |
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${{ github.sha }}.zip --region ${{ env.AWS_REGION }}
