@@ -1,4 +1,3 @@
-
 name: CDK Deploy Pipeline
 
 on:
@@ -80,10 +79,17 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }}
 
+      - name: Install CDK Nag Locally
+        run: npm install cdk-nag --prefix .cdk-nag-tmp
+
+      - name: Validate Synthesized CDK Output with CDK Nag
+        run: npx --prefix .cdk-nag-tmp cdk-nag check cdk.out --fail-on-error
+
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
+
       - name: Upload to S3 bucket with short commit SHA
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
