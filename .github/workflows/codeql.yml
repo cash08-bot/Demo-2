@@ -1,17 +1,10 @@
-
 name: CDK Deploy Pipeline
 
 on:
   push:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
 
 permissions:
   id-token: write
@@ -51,7 +44,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::<381492133980>:role/GitHubAction-AssumeRoleWithAction.
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -78,12 +71,33 @@ jobs:
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+        run: |
+          cdk synth --context env=${{ env.ENV_ID }} > template.yaml
+          mkdir -p cdk.out && mv template.yaml cdk.out/template.yaml
+
+      - name: Install CloudFormation Guard (cfn-guard)
+        run: |
+          curl -Lo cfn-guard https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux
+          chmod +x cfn-guard
+          sudo mv cfn-guard /usr/local/bin/
+
+      - name: Create example guard rule
+        run: |
+          mkdir -p guard-rules
+          echo '
+          Resources.*.Type == "AWS::S3::Bucket"
+          Resources.*.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
+          ' > guard-rules/s3-encryption.guard
+
+      - name: Validate template using cfn-guard
+        run: |
+          cfn-guard validate -r guard-rules -d cdk.out/template.yaml
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
+
       - name: Upload to S3 bucket with short commit SHA
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
