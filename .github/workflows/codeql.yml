@@ -2,15 +2,9 @@ name: CDK Deploy Pipeline
 
 on:
   push:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
 
 permissions:
   id-token: write
@@ -76,8 +70,29 @@ jobs:
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+      - name: Run CDK synth and output to template.yaml
+        run: |
+          cdk synth --context env=${{ env.ENV_ID }} > template.yaml
+          mkdir -p cdk.out
+          mv template.yaml cdk.out/template.yaml
+
+      - name: Install CloudFormation Guard (cfn-guard)
+        run: |
+          curl -Lo cfn-guard https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux
+          chmod +x cfn-guard
+          sudo mv cfn-guard /usr/local/bin/
+
+      - name: Create basic compliance rule (S3 example)
+        run: |
+          mkdir -p guard-rules
+          echo '
+          Resources.*.Type == "AWS::S3::Bucket"
+          Resources.*.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
+          ' > guard-rules/s3-encryption.guard
+
+      - name: Validate CloudFormation template with cfn-guard
+        run: |
+          cfn-guard validate -r guard-rules -d cdk.out/template.yaml
 
       - name: Zip the CDK project
         run: |
