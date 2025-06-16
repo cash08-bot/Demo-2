@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [prod, dev, stg]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
@@ -13,7 +17,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  synth-and-upload:
+  synth-and-validate:
     runs-on: ubuntu-latest
 
     strategy:
@@ -34,7 +38,7 @@ jobs:
       BUCKET_NAME: test-1-git
 
     steps:
-      - name: Exit if branch does not match matrix branch
+      - name: Exit if branch does not match matrix.branch
         if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
         run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
 
@@ -48,10 +52,13 @@ jobs:
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Node.js
+      - name: Set up Node.js (latest LTS)
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 'lts/*'
+
+      - name: Acknowledge Node.js notice
+        run: npx cdk acknowledge 34635 || true
 
       - name: Set up Maven
         uses: s4u/setup-maven-action@v1.11.0
@@ -64,7 +71,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up AWS CDK
+      - name: Install AWS CDK
         run: npm install -g aws-cdk
 
       - name: Replace version tag in cdk.json and print
@@ -84,26 +91,23 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
-      - name: Install CFN Guard
+      - name: Install CFN Guard CLI
         run: |
-          curl -sL https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.tar.gz | tar xz
-          sudo mv cfn-guard /usr/local/bin/
+          curl -Lo cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux.zip
+          unzip cfn-guard.zip -d cfn-guard-bin
+          sudo mv cfn-guard-bin/cfn-guard /usr/local/bin/
           cfn-guard --version
 
       - name: Download NIST 800-53 rules
         run: |
-          mkdir -p nist-rules
-          curl -sL https://github.com/aws-cloudformation/cloudformation-guard/archive/refs/heads/main.tar.gz \
-            | tar -xz --strip-components=3 -C nist-rules cloudformation-guard-main/rules/nist-800-53-r5/cfn-guard
+          mkdir -p guard-rules
+          curl -sL https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/examples/rules/nist-800-53/require-tags.guard -o guard-rules/nist.guard
 
-      - name: Validate with CFN Guard (NIST 800-53)
+      - name: Validate templates with CFN Guard
         run: |
-          for file in cdk.out/*.template.json; do
-            echo "Validating $file against NIST 800-53 rules..."
-            cfn-guard validate \
-              --rules nist-rules \
-              --data "$file" \
-              --output-format summary || exit 1
+          for f in cdk.out/*.template.json; do
+            echo "Validating $f"
+            cfn-guard validate -d "$f" -r guard-rules/nist.guard || exit 1
           done
 
       - name: Zip the CDK project
@@ -111,7 +115,7 @@ jobs:
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket with short commit SHA
+      - name: Upload to S3 with short commit ID
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
