@@ -76,8 +76,22 @@ jobs:
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+      - name: Run CDK synth with output to cdk.out
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+
+      - name: Install cfn-guard CLI
+        run: |
+          curl -L -o cfn-guard.tar.gz https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.tar.gz
+          tar -xzf cfn-guard.tar.gz
+          sudo mv cfn-guard /usr/local/bin/
+          cfn-guard --version
+
+      - name: Run CFN Guard validation on generated templates
+        run: |
+          for template in cdk.out/*.template.json; do
+            echo "Validating $template"
+            cfn-guard validate --template $template --rules path/to/your/guard.rules || exit 1
+          done
 
       - name: Zip the CDK project
         run: |
