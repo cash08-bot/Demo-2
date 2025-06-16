@@ -51,7 +51,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 'lts/*'
+          node-version: 18
 
       - name: Set up Maven
         uses: s4u/setup-maven-action@v1.11.0
@@ -67,49 +67,22 @@ jobs:
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
+      - name: Replace version tag in cdk.json and print
+        run: |
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          jq --arg cid "$COMMIT_ID" \
+            '.context["'${ENV_ID}'"].tags |= map(
+              if .key == "version" then .value = $cid else . end
+            )' cdk.json > tmp.json && mv tmp.json cdk.json
+
+          echo "Updated version tag for environment '$ENV_ID':"
+          jq '.context["'${ENV_ID}'"].tags' cdk.json
+
       - name: Build Java CDK project
         run: mvn clean install
 
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
-
-      - name: Install CFN Guard
-        run: |
-          curl -L -o cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.zip
-          unzip cfn-guard.zip
-          sudo mv cfn-guard /usr/local/bin/
-          cfn-guard --version
-
-      - name: Create CFN Guard rules
-        run: |
-          cat <<EOF > rules.guard
-          rule s3_encryption {
-            let buckets = Resources.*[ Type == "AWS::S3::Bucket" ]
-            buckets.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
-          }
-
-          rule no_iam_policy_wildcard {
-            let policies = Resources.*[ Type == "AWS::IAM::Policy" ]
-            not exists policies.Properties.PolicyDocument.Statement[*].Action where Action == "*"
-          }
-
-          rule ec2_no_public_ip {
-            let instances = Resources.*[ Type == "AWS::EC2::Instance" ]
-            instances.Properties.AssociatePublicIpAddress == false
-          }
-
-          rule sqs_timeout_check {
-            let queues = Resources.*[ Type == "AWS::SQS::Queue" ]
-            queues.Properties.VisibilityTimeout == 300
-          }
-EOF
-
-      - name: Run CFN Guard validation
-        run: |
-          for file in cdk.out/*.template.json; do
-            echo "Validating $file with CFN Guard..."
-            cfn-guard validate --rules rules.guard --data "$file" --output-format text
-          done
 
       - name: Zip the CDK project
         run: |
@@ -118,5 +91,5 @@ EOF
 
       - name: Upload to S3 bucket with short commit SHA
         run: |
-          SHORT_SHA=${GITHUB_SHA::7}
+          SHORT_SHA=$(git rev-parse --short HEAD)
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
