@@ -2,9 +2,15 @@ name: CDK Deploy Pipeline
 
 on:
   push:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
   pull_request:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
 
 permissions:
   id-token: write
@@ -13,7 +19,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  synth-and-upload:
+  synth-and-validate:
     runs-on: ubuntu-latest
 
     strategy:
@@ -36,7 +42,9 @@ jobs:
     steps:
       - name: Exit if branch does not match matrix branch
         if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
-        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
+        run: |
+          echo "Skipping job as this branch doesn't match matrix.branch"
+          exit 0
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -73,9 +81,16 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
+      - name: Download and install CFN Guard
+        run: |
+          curl -L -o cfn-guard.tar.gz https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.tar.gz
+          tar -xzf cfn-guard.tar.gz
+          sudo mv cfn-guard /usr/local/bin/
+          cfn-guard --version
+
       - name: Create CFN Guard rules
         run: |
-          cat <<EOF > rules.guard
+          cat <<'EOF' > rules.guard
           rule s3_encryption {
             let buckets = Resources.*[ Type == "AWS::S3::Bucket" ]
             buckets.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
@@ -95,29 +110,8 @@ jobs:
             let queues = Resources.*[ Type == "AWS::SQS::Queue" ]
             queues.Properties.VisibilityTimeout == 300
           }
-EOF
+          EOF
 
-      - name: Install CFN Guard
+      - name: Validate CloudFormation template with CFN Guard
         run: |
-          curl -Lo cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.zip
-          unzip cfn-guard.zip
-          chmod +x cfn-guard
-          sudo mv cfn-guard /usr/local/bin/
-          cfn-guard --version
-
-      - name: Validate with CFN Guard
-        run: |
-          for file in cdk.out/*.template.json; do
-            echo "Validating $file"
-            cfn-guard validate --rules rules.guard --data "$file" || exit 1
-          done
-
-      - name: Zip the CDK project
-        run: |
-          zip -r cdk-project.zip . -x ".git/*" ".github/*"
-          ls -lh cdk-project.zip
-
-      - name: Upload to S3 bucket with short commit SHA
-        run: |
-          SHORT_SHA=${GITHUB_SHA::7}
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
+          cfn-guard validate --rules rules.guard --template cdk.out/${{ env.ENV_ID }}Stack.template.json
