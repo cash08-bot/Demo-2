@@ -81,8 +81,10 @@ jobs:
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+      - name: Run CDK synth with CDK Nag checks
+        run: |
+          echo "Running CDK synth with CDK Nag validation..."
+          cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
       - name: Zip the CDK project
         run: |
