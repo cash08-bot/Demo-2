@@ -12,6 +12,10 @@ permissions:
   actions: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   synth-and-upload:
     runs-on: ubuntu-latest
@@ -36,7 +40,9 @@ jobs:
     steps:
       - name: Exit if branch does not match matrix branch
         if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
-        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
+        run: |
+          echo "Skipping job as this branch doesn't match matrix.branch"
+          exit 0
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -48,10 +54,10 @@ jobs:
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Node.js
+      - name: Set up Node.js (LTS)
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: '20'
 
       - name: Set up Maven
         uses: s4u/setup-maven-action@v1.11.0
@@ -67,29 +73,60 @@ jobs:
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
+      - name: Get short commit ID
+        id: vars
+        run: echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
       - name: Replace version tag in cdk.json and print
         run: |
-          COMMIT_ID=$(git rev-parse --short HEAD)
+          echo "Replacing version tag in cdk.json with commit ID: $COMMIT_ID"
           jq --arg cid "$COMMIT_ID" \
             '.context["'${ENV_ID}'"].tags |= map(
               if .key == "version" then .value = $cid else . end
             )' cdk.json > tmp.json && mv tmp.json cdk.json
 
-          echo "Updated version tag for environment '$ENV_ID':"
+          echo "Updated tags:"
           jq '.context["'${ENV_ID}'"].tags' cdk.json
 
       - name: Build Java CDK project
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+        run: |
+          echo "Synthesizing CDK app for environment: $ENV_ID"
+          set -e
+          cdk synth --context env=$ENV_ID --output cdk.out
+
+      - name: Install CFN Guard
+        run: |
+          curl -Lo cfn-guard https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux
+          chmod +x cfn-guard
+          sudo mv cfn-guard /usr/local/bin/
+
+      - name: Validate CloudFormation template with CFN Guard
+        run: |
+          TEMPLATE_PATH="cdk.out/${ENV_ID}.template.json"
+          RULES_PATH="rules.guard"
+
+          if [ ! -f "$TEMPLATE_PATH" ]; then
+            echo "CloudFormation template not found at $TEMPLATE_PATH"
+            exit 1
+          fi
+
+          if [ ! -f "$RULES_PATH" ]; then
+            echo "CFN Guard rules file not found at $RULES_PATH"
+            exit 1
+          fi
+
+          echo "Validating $TEMPLATE_PATH with CFN Guard rules $RULES_PATH"
+          cfn-guard validate -d "$TEMPLATE_PATH" -r "$RULES_PATH"
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket with short commit SHA
+      - name: Upload zipped CDK project to S3
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
