@@ -86,12 +86,14 @@
     "@aws-cdk/aws-dynamodb:retainTableReplica": true,
     "@aws-cdk/aws-stepfunctions:useDistributedMapResultWriterV2": true,
     "@aws-cdk/s3-notifications:addS3TrustKeyPolicyForSnsSubscriptions": true,
-"dev": {
-  "tags": [
-    {
-      "key": "version",
-      "value": "place_Holder"
-    }
-  ]
-}
+    "dev": {
+      "tags": [
+        {
+          "key": "version",
+          "value": "place_Holder"
+        }
+        ]
+        }
+  }
 
+}
