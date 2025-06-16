@@ -1,16 +1,10 @@
-name: CDK Deploy Pipeline
+name: CDK Deploy Pipeline with External CDK Nag
 
 on:
   push:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
 
 permissions:
   id-token: write
@@ -19,7 +13,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  synth-and-upload:
+  synth-and-cdknag:
     runs-on: ubuntu-latest
 
     strategy:
@@ -70,21 +64,59 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up AWS CDK
-        run: npm install -g aws-cdk
+      - name: Install CDK CLI and CDK Nag
+        run: |
+          npm install -g aws-cdk
+          npm install cdk-nag aws-cdk-lib constructs typescript
 
-      - name: Build Java CDK project
+      - name: Build CDK project
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
-      - name: Zip the CDK project
+      - name: Run CDK Nag on synthesized templates
         run: |
-          zip -r cdk-project.zip . -x ".git/*" ".github/*"
-          ls -lh cdk-project.zip
+          echo "Running CDK Nag validations..."
+          node <<'EOF'
+          const { NagPack, NagMessageLevel, validateStack } = require('cdk-nag');
+          const { App, Stack } = require('aws-cdk-lib');
+          const fs = require('fs');
+          const path = require('path');
+
+          const dir = './cdk.out';
+          const files = fs.readdirSync(dir).filter(f => f.endsWith('.template.json'));
+
+          let failed = false;
+
+          for (const file of files) {
+            const templatePath = path.join(dir, file);
+            console.log(`Validating ${templatePath}`);
+            const stackName = path.basename(file, '.template.json');
+
+            const messages = validateStack(templatePath, {
+              logLevel: NagMessageLevel.ERROR,
+              verbose: true,
+              nagPacks: [new NagPack()],
+            });
+
+            if (messages.length > 0) {
+              failed = true;
+              console.error(`❌ CDK Nag found issues in ${stackName}:`);
+              for (const msg of messages) {
+                console.error(` - ${msg.ruleId}: ${msg.message}`);
+              }
+            } else {
+              console.log(`✅ ${stackName} passed CDK Nag validation.`);
+            }
+          }
+
+          if (failed) {
+            process.exit(1);
+          }
+          EOF
 
       - name: Upload to S3 bucket with short commit SHA
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-nag-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
