@@ -44,7 +44,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -73,13 +73,6 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
-      - name: Install CFN Guard
-        run: |
-          curl -L -o cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.zip
-          unzip cfn-guard.zip
-          sudo mv cfn-guard /usr/local/bin/
-          cfn-guard --version
-
       - name: Create CFN Guard rules
         run: |
           cat <<EOF > rules.guard
@@ -104,11 +97,19 @@ jobs:
           }
 EOF
 
-      - name: Run CFN Guard validation
+      - name: Install CFN Guard
+        run: |
+          curl -Lo cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.zip
+          unzip cfn-guard.zip
+          chmod +x cfn-guard
+          sudo mv cfn-guard /usr/local/bin/
+          cfn-guard --version
+
+      - name: Validate with CFN Guard
         run: |
           for file in cdk.out/*.template.json; do
-            echo "Validating $file with CFN Guard..."
-            cfn-guard validate --rules rules.guard --data "$file" --output-format text
+            echo "Validating $file"
+            cfn-guard validate --rules rules.guard --data "$file" || exit 1
           done
 
       - name: Zip the CDK project
