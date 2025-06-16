@@ -41,10 +41,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Set COMMIT_ID env var
+        run: echo "COMMIT_ID=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -67,14 +70,19 @@ jobs:
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
+      - name: Replace placeholder in cdk.json with commit ID
+        run: |
+          jq --arg cid "$COMMIT_ID" '
+            .context.${{ env.ENV_ID }}.tags |= map(if .key == "version" then .value = $cid else . end)
+          ' cdk.json > temp.json && mv temp.json cdk.json
+
       - name: Build Java CDK project
         run: mvn clean install
 
       - name: Run CDK synth and output to template.yaml
         run: |
-          cdk synth --context env=${{ env.ENV_ID }} > template.yaml
           mkdir -p cdk.out
-          mv template.yaml cdk.out/template.yaml
+          cdk synth --context env=${{ env.ENV_ID }} > cdk.out/template.yaml
 
       - name: Install CloudFormation Guard (cfn-guard)
         run: |
@@ -82,23 +90,40 @@ jobs:
           chmod +x cfn-guard
           sudo mv cfn-guard /usr/local/bin/
 
-      - name: Create basic compliance rule (S3 example)
+      - name: Create CFN Guard rules
         run: |
           mkdir -p guard-rules
-          echo '
-          Resources.*.Type == "AWS::S3::Bucket"
-          Resources.*.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
-          ' > guard-rules/s3-encryption.guard
+          cat <<EOF > guard-rules/rules.guard
+          rule s3_encryption {
+            let buckets = Resources.*[ Type == "AWS::S3::Bucket" ]
+            buckets.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
+          }
+
+          rule no_iam_policy_wildcard {
+            let policies = Resources.*[ Type == "AWS::IAM::Policy" ]
+            not exists policies.Properties.PolicyDocument.Statement[*].Action where Action == "*"
+          }
+
+          rule ec2_no_public_ip {
+            let instances = Resources.*[ Type == "AWS::EC2::Instance" ]
+            instances.Properties.AssociatePublicIpAddress == false
+          }
+
+          rule sqs_timeout_check {
+            let queues = Resources.*[ Type == "AWS::SQS::Queue" ]
+            queues.Properties.VisibilityTimeout == 300
+          }
+EOF
 
       - name: Validate CloudFormation template with cfn-guard
         run: |
-          cfn-guard validate -r guard-rules -d cdk.out/template.yaml
+          cfn-guard validate -r guard-rules/rules.guard -d cdk.out/template.yaml --output-format text
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket ${{ env.BUCKET_NAME }}
+      - name: Upload to S3 bucket
         run: |
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${{ env.COMMIT_ID }}.zip --region ${{ env.AWS_REGION }}
