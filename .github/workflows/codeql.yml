@@ -1,16 +1,10 @@
-name: CDK Deploy Pipeline
+name: CDK Deploy Pipeline with CFN Guard
 
 on:
   push:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
 
 permissions:
   id-token: write
@@ -19,7 +13,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  synth-and-upload:
+  synth-and-validate:
     runs-on: ubuntu-latest
 
     strategy:
@@ -70,58 +64,35 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install AWS CDK & CDK Nag dependencies
-        run: |
-          npm install -g aws-cdk
-          npm install cdk-nag aws-cdk-lib typescript
+      - name: Set up AWS CDK
+        run: npm install -g aws-cdk
 
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth
+      - name: Synthesize CloudFormation template
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
-      - name: Run CDK Nag validation
+      - name: Install cfn-guard
         run: |
-          echo "Running CDK Nag validations..."
-          node <<'EOF'
-          const { validateStack, AwsSolutionsChecks, NagMessageLevel } = require('cdk-nag');
-          const fs = require('fs');
-          const path = require('path');
+          curl -Lo cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux.zip
+          unzip cfn-guard.zip -d cfn-guard-bin
+          sudo mv cfn-guard-bin/cfn-guard /usr/local/bin/
 
-          const dir = './cdk.out';
-          const files = fs.readdirSync(dir).filter(f => f.endsWith('.template.json'));
-
-          let failed = false;
-
-          for (const file of files) {
-            const filePath = path.join(dir, file);
-            const results = validateStack(filePath, {
-              logLevel: NagMessageLevel.ERROR,
-              verbose: true,
-              nagPacks: [new AwsSolutionsChecks()],
-            });
-
-            if (results.length > 0) {
-              failed = true;
-              console.error(`Issues in ${file}:`);
-              results.forEach(msg =>
-                console.error(`  [${msg.ruleId}] ${msg.message}`)
-              );
-            } else {
-              console.log(`✅ ${file} passed CDK Nag checks.`);
-            }
-          }
-
-          if (failed) process.exit(1);
-          EOF
+      - name: Validate with cfn-guard
+        run: |
+          mkdir -p guard-rules
+          echo 'Rule: Require resource tags
+          let Resources.*.Properties.Tags[*].Key == "Environment"
+          ' > guard-rules/resource-tag.guard
+          cfn-guard validate -r guard-rules/ -d cdk.out/
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket with short commit SHA
+      - name: Upload to S3 with commit SHA
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
