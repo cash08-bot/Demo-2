@@ -2,15 +2,9 @@ name: CDK Deploy Pipeline
 
 on:
   push:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - prod
-      - dev
-      - stg
+    branches: [prod, dev, stg]
 
 permissions:
   id-token: write
@@ -50,7 +44,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -77,7 +71,37 @@ jobs:
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+
+      - name: Install CFN Guard
+        run: |
+          curl -L -o cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux.zip
+          unzip cfn-guard.zip
+          sudo mv cfn-guard /usr/local/bin/
+          cfn-guard --version
+
+      - name: Create CFN Guard rules file
+        run: |
+          cat <<EOF > rules.guard
+          S3Bucket is AWS::S3::Bucket
+          S3Bucket.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
+
+          IAMPolicy is AWS::IAM::Policy
+          IAMPolicy.Properties.PolicyDocument.Statement[*].Action != "*"
+
+          EC2Instance is AWS::EC2::Instance
+          EC2Instance.Properties.AssociatePublicIpAddress == false
+
+          SQSQueue is AWS::SQS::Queue
+          SQSQueue.Properties.VisibilityTimeout == 300
+EOF
+
+      - name: Run CFN Guard validation
+        run: |
+          for file in cdk.out/*.template.json; do
+            echo "Validating $file..."
+            cfn-guard validate --rules rules.guard --data "$file" || exit 1
+          done
 
       - name: Zip the CDK project
         run: |
