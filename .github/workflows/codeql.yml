@@ -77,8 +77,25 @@ jobs:
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
+      - name: Install cfn-guard
+        run: |
+          curl -Lo cfn-guard.zip https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux.zip
+          unzip cfn-guard.zip -d cfn-guard-bin
+          sudo mv cfn-guard-bin/cfn-guard /usr/local/bin/
+
+      - name: Create CFN Guard rules
+        run: |
+          mkdir -p guard-rules
+          echo 'Rule: Require Environment tag
+          let Resources.*.Properties.Tags[*].Key == "Environment"
+          ' > guard-rules/resource-tags.guard
+
+      - name: Run cfn-guard validation
+        run: |
+          cfn-guard validate -r guard-rules/ -d cdk.out/
+          
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
