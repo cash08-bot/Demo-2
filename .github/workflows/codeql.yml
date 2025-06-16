@@ -1,10 +1,16 @@
-name: CDK Deploy Pipeline with CFN Guard
+name: CDK Deploy Pipeline
 
 on:
   push:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
   pull_request:
-    branches: [prod, dev, stg]
+    branches:
+      - prod
+      - dev
+      - stg
 
 permissions:
   id-token: write
@@ -13,7 +19,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  synth-and-validate:
+  synth-and-upload:
     runs-on: ubuntu-latest
 
     strategy:
@@ -70,7 +76,7 @@ jobs:
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Synthesize CloudFormation template
+      - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
       - name: Install cfn-guard
@@ -79,20 +85,23 @@ jobs:
           unzip cfn-guard.zip -d cfn-guard-bin
           sudo mv cfn-guard-bin/cfn-guard /usr/local/bin/
 
-      - name: Validate with cfn-guard
+      - name: Create CFN Guard rules
         run: |
           mkdir -p guard-rules
-          echo 'Rule: Require resource tags
+          echo 'Rule: Require Environment tag
           let Resources.*.Properties.Tags[*].Key == "Environment"
-          ' > guard-rules/resource-tag.guard
-          cfn-guard validate -r guard-rules/ -d cdk.out/
+          ' > guard-rules/resource-tags.guard
 
+      - name: Run cfn-guard validation
+        run: |
+          cfn-guard validate -r guard-rules/ -d cdk.out/
+          
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 with commit SHA
+      - name: Upload to S3 bucket with short commit SHA
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
