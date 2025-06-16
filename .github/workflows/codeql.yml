@@ -84,6 +84,28 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
+      - name: Install CFN Guard
+        run: |
+          curl -sL https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux-x86_64.tar.gz | tar xz
+          sudo mv cfn-guard /usr/local/bin/
+          cfn-guard --version
+
+      - name: Download NIST 800-53 rules
+        run: |
+          mkdir -p nist-rules
+          curl -sL https://github.com/aws-cloudformation/cloudformation-guard/archive/refs/heads/main.tar.gz \
+            | tar -xz --strip-components=3 -C nist-rules cloudformation-guard-main/rules/nist-800-53-r5/cfn-guard
+
+      - name: Validate with CFN Guard (NIST 800-53)
+        run: |
+          for file in cdk.out/*.template.json; do
+            echo "Validating $file against NIST 800-53 rules..."
+            cfn-guard validate \
+              --rules nist-rules \
+              --data "$file" \
+              --output-format summary || exit 1
+          done
+
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
