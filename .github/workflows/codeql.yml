@@ -84,14 +84,17 @@ jobs:
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
       - name: Install CDK Nag CLI
-        run: npm install -g cdk-nag
+        run: |
+          npm install -g cdk-nag
+          echo "Installed CLI:"
+          ls -l $(npm root -g)/.bin/
 
       - name: Run CDK Nag (NIST80053R5) and generate CSV
         run: |
           echo "Running CDK Nag on synthesized templates..."
           for file in $(find cdk.out -name "*.template.json"); do
             echo "Checking: $file"
-            cdk-nag-cli --template "$file" --nag-pack NIST80053R5 --output-format csv --output-path "nag-report.csv" || exit 1
+            $(npm root -g)/.bin/cdk-nag-cli --template "$file" --nag-pack NIST80053R5 --output-format csv --output-path nag-report.csv || exit 1
           done
 
       - name: Upload CDK Nag CSV report to S3
