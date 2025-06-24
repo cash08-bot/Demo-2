@@ -84,6 +84,16 @@ jobs:
       - name: Run CDK synth
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
+      - name: Install CDK Nag CLI
+        run: npm install -g @cdklabs/cdk-nag
+
+      - name: Run CDK Nag (NIST80053R5) on synthesized templates
+        run: |
+          for file in $(find cdk.out -name "*.template.json"); do
+            echo "Running CDK Nag (NIST80053R5) on $file"
+            cdk-nag --template "$file" --nag-pack NIST80053R5 || exit 1
+          done
+
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
