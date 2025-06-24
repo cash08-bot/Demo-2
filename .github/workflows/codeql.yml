@@ -41,13 +41,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set COMMIT_ID env var
-        run: echo "COMMIT_ID=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -70,60 +67,41 @@ jobs:
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
-      - name: Replace placeholder in cdk.json with commit ID
+      - name: Replace version tag in cdk.json and print
         run: |
-          jq --arg cid "$COMMIT_ID" '
-            .context.${{ env.ENV_ID }}.tags |= map(if .key == "version" then .value = $cid else . end)
-          ' cdk.json > temp.json && mv temp.json cdk.json
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          jq --arg cid "$COMMIT_ID" \
+            '.context["'${ENV_ID}'"].tags |= map(
+              if .key == "version" then .value = $cid else . end
+            )' cdk.json > tmp.json && mv tmp.json cdk.json
+          echo "Updated version tag for environment '$ENV_ID':"
+          jq '.context["'${ENV_ID}'"].tags' cdk.json
 
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth and output to template.yaml
+      - name: Run CDK synth
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+
+      # ✅ CDK Nag steps start here
+      - name: Install CDK Nag CLI
+        run: npm install -g @cdklabs/cdk-nag
+
+      - name: Run CDK Nag (NIST80053R5) on synthesized templates
         run: |
-          mkdir -p cdk.out
-          cdk synth --context env=${{ env.ENV_ID }} > cdk.out/template.yaml
-
-      - name: Install CloudFormation Guard (cfn-guard)
-        run: |
-          curl -Lo cfn-guard https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-linux
-          chmod +x cfn-guard
-          sudo mv cfn-guard /usr/local/bin/
-
-      - name: Create CFN Guard rules
-        run: |
-          mkdir -p guard-rules
-          cat <<EOF > guard-rules/rules.guard
-          rule s3_encryption {
-            let buckets = Resources.*[ Type == "AWS::S3::Bucket" ]
-            buckets.Properties.BucketEncryption.ServerSideEncryptionConfiguration[*].ServerSideEncryptionByDefault.SSEAlgorithm == "AES256"
-          }
-
-          rule no_iam_policy_wildcard {
-            let policies = Resources.*[ Type == "AWS::IAM::Policy" ]
-            not exists policies.Properties.PolicyDocument.Statement[*].Action where Action == "*"
-          }
-
-          rule ec2_no_public_ip {
-            let instances = Resources.*[ Type == "AWS::EC2::Instance" ]
-            instances.Properties.AssociatePublicIpAddress == false
-          }
-
-          rule sqs_timeout_check {
-            let queues = Resources.*[ Type == "AWS::SQS::Queue" ]
-            queues.Properties.VisibilityTimeout == 300
-          }
-EOF
-
-      - name: Validate CloudFormation template with cfn-guard
-        run: |
-          cfn-guard validate -r guard-rules/rules.guard -d cdk.out/template.yaml --output-format text
+          echo "Running CDK Nag on synthesized templates..."
+          for file in $(find cdk.out -name "*.template.json"); do
+            echo "Checking: $file"
+            cdk-nag --template "$file" --nag-pack NIST80053R5 || exit 1
+          done
+      # ✅ CDK Nag steps end here
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket
+      - name: Upload to S3 bucket with short commit SHA
         run: |
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${{ env.COMMIT_ID }}.zip --region ${{ env.AWS_REGION }}
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
