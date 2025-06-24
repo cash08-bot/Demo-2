@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
-         xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.myorg</groupId>
@@ -13,19 +14,22 @@
         <cdk.version>2.195.0</cdk.version>
         <constructs.version>[10.0.0,11.0.0)</constructs.version>
         <junit.version>5.7.1</junit.version>
+        <maven.compiler.release>17</maven.compiler.release>
     </properties>
 
     <build>
         <plugins>
+            <!-- Compiler plugin for Java 17 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <release>17</release>
+                    <release>${maven.compiler.release}</release>
                 </configuration>
             </plugin>
 
+            <!-- Exec plugin to run the main class -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -38,33 +42,26 @@
     </build>
 
     <dependencies>
-        <!-- AWS Cloud Development Kit -->
+        <!-- AWS CDK library -->
         <dependency>
             <groupId>software.amazon.awscdk</groupId>
             <artifactId>aws-cdk-lib</artifactId>
             <version>${cdk.version}</version>
         </dependency>
 
-        <!-- Constructs -->
+        <!-- Constructs library -->
         <dependency>
             <groupId>software.constructs</groupId>
             <artifactId>constructs</artifactId>
             <version>${constructs.version}</version>
         </dependency>
 
-        <!-- JUnit -->
+        <!-- JUnit for testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
             <scope>test</scope>
-        </dependency>
-
-        <!-- ✅ CDK Nag -->
-        <dependency>
-            <groupId>io.cdk</groupId>
-            <artifactId>cdk-nag</artifactId>
-            <version>2.0.192</version>
         </dependency>
     </dependencies>
 </project>

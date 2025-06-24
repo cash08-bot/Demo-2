@@ -1,57 +1,59 @@
-name: CDK Deploy Pipeline
+name: BranchValidation & CodeBuild
 
 on:
   push:
-    branches: [prod, dev, stg]
+    branches: [dev, stg, prd]
   pull_request:
-    branches: [prod, dev, stg]
+    branches: [dev, stg, prd, main]
 
 permissions:
-  id-token: write
   contents: read
   actions: write
   pull-requests: write
 
 jobs:
-  synth-and-upload:
+  validate-pr:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        include:
-          - branch: dev
-            env_name: dev
-          - branch: stg
-            env_name: stg
-          - branch: prod
-            env_name: prod
-
-    environment: ${{ matrix.env_name }}
-
-    env:
-      ENV_ID: ${{ matrix.env_name }}
-      AWS_REGION: us-east-1
-      BUCKET_NAME: test-1-git
-
     steps:
-      - name: Exit if branch does not match matrix branch
-        if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
-        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
+      - name: Validate PR Source Branch
+        run: |
+          echo "SOURCE BRANCH: ${{ github.head_ref }}"
+          echo "TARGET BRANCH: ${{ github.base_ref }}"
 
+          if [[ "${{ github.base_ref }}" == "dev" ]]; then
+            if [[ ! "${{ github.head_ref }}" =~ ^(feature|bug|fix)/.+$ ]]; then
+              echo "Branch name must start with 'feature/', 'bug/', or 'fix/' when PR target is 'dev'"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ github.base_ref }}" == "stg" ]]; then
+            if [[ ! "${{ github.head_ref }}" =~ ^promotion/.+$ ]]; then
+              echo "Only 'promotion/' can raise PRs to 'stg'"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ github.base_ref }}" == "prd" ]]; then
+            if [[ ! "${{ github.head_ref }}" =~ ^release/.+$ ]]; then
+              echo "Only 'release/' can raise PRs to 'prd'"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" != "prd" ]]; then
+            echo "Only 'prd' can raise PRs to 'main'"
+            exit 1
+          fi
+
+          echo "✅ PR source branch is valid."
+
+  code-validate:
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
-          role-session-name: Github-Role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
 
       - name: Set up Maven
         uses: s4u/setup-maven-action@v1.11.0
@@ -64,32 +66,5 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up AWS CDK
-        run: npm install -g aws-cdk
-
-      - name: Replace version tag in cdk.json and print
-        run: |
-          COMMIT_ID=$(git rev-parse --short HEAD)
-          jq --arg cid "$COMMIT_ID" \
-            '.context["'${ENV_ID}'"].tags |= map(
-              if .key == "version" then .value = $cid else . end
-            )' cdk.json > tmp.json && mv tmp.json cdk.json
-
-          echo "Updated version tag for environment '$ENV_ID':"
-          jq '.context["'${ENV_ID}'"].tags' cdk.json
-
       - name: Build Java CDK project
-        run: mvn clean install
-
-      - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
-
-      - name: Zip the CDK project
-        run: |
-          zip -r cdk-project.zip . -x ".git/*" ".github/*"
-          ls -lh cdk-project.zip
-
-      - name: Upload to S3 bucket with short commit SHA
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
+        run: mvn clean package
