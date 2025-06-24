@@ -87,7 +87,8 @@ jobs:
         run: |
           npm install -g cdk-nag
           echo "Installed CLI:"
-          ls -l $(npm root -g)/.bin/
+          npm bin -g
+          ls -l $(npm bin -g)
 
       - name: Run CDK Nag (NIST80053R5) and generate CSV
         run: |
