@@ -85,7 +85,7 @@ jobs:
 
       # ✅ CDK Nag steps start here
       - name: Install CDK Nag CLI
-        run: npm install -g @cdklabs/cdk-nag
+        run: npm install -g cdk-nag
 
       - name: Run CDK Nag (NIST80053R5) on synthesized templates
         run: |
