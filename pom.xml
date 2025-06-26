@@ -49,6 +49,9 @@
             <artifactId>constructs</artifactId>
             <version>${constructs.version}</version>
         </dependency>
+             <groupId>io.github.cdklabs</groupId>
+             <artifactId>cdknag</artifactId>
+             <version>2.25.2</version>
 
         <dependency>
           <groupId>org.junit.jupiter</groupId>
