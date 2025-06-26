@@ -44,7 +44,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -61,11 +61,21 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
+
+      - name: Replace version tag in cdk.json and print
+        run: |
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          jq --arg cid "$COMMIT_ID" \
+            '.context["'${ENV_ID}'"].tags |= map(
+              if .key == "version" then .value = $cid else . end
+            )' cdk.json > tmp.json && mv tmp.json cdk.json
+          echo "Updated version tag for environment '$ENV_ID':"
+          jq '.context["'${ENV_ID}'"].tags' cdk.json
 
       - name: Build Java CDK project
         run: mvn clean install
@@ -74,33 +84,21 @@ jobs:
         run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
       - name: Install CDK Nag CLI
-        run: |
-          npm install -g cdk-nag
-          BIN_PATH=$(npm bin -g)
-          echo "Installed CLI in: $BIN_PATH"
-          ls -l "$BIN_PATH"
-
-      - name: Add CLI to PATH
-        run: echo "$(npm bin -g)" >> $GITHUB_PATH
+        run: npm install -g @cdklabs/cdk-nag-cli
 
       - name: Run CDK Nag (NIST80053R5) and generate CSV
         run: |
           echo "Running CDK Nag on synthesized templates..."
+          > nag-report.csv
           for file in $(find cdk.out -name "*.template.json"); do
             echo "Checking: $file"
-            cdk-nag-cli \
-              --template "$file" \
-              --nag-pack NIST80053R5 \
-              --output-format csv \
-              --output-path nag-report.csv || exit 1
+            cdk-nag-cli --template "$file" --nag-pack NIST80053R5 --output-format csv --output-path nag-report.csv || exit 1
           done
 
       - name: Upload CDK Nag CSV report to S3
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          aws s3 cp nag-report.csv \
-            s3://${{ env.BUCKET_NAME }}/nag-report-${{ env.ENV_ID }}-${SHA}.csv \
-            --region ${{ env.AWS_REGION }}
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp nag-report.csv s3://${{ env.BUCKET_NAME }}/nag-report-${{ env.ENV_ID }}-${SHORT_SHA}.csv --region ${{ env.AWS_REGION }}
 
       - name: Zip the CDK project
         run: |
@@ -109,7 +107,5 @@ jobs:
 
       - name: Upload CDK project zip to S3
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          aws s3 cp cdk-project.zip \
-            s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHA}.zip \
-            --region ${{ env.AWS_REGION }}
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
