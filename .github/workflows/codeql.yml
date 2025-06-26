@@ -44,7 +44,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
@@ -53,43 +53,32 @@ jobs:
         with:
           node-version: 18
 
-      - name: Set up Maven
-        uses: s4u/setup-maven-action@v1.11.0
-        with:
-          maven-version: '3.9.6'
-
-      - name: Set up Java
+      - name: Set up Java and Maven
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up AWS CDK
-        run: npm install -g aws-cdk
-
-      - name: Replace version tag in cdk.json and print
-        run: |
-          COMMIT_ID=$(git rev-parse --short HEAD)
-          jq --arg cid "$COMMIT_ID" \
-            '.context["'${ENV_ID}'"].tags |= map(
-              if .key == "version" then .value = $cid else . end
-            )' cdk.json > tmp.json && mv tmp.json cdk.json
-
-          echo "Updated version tag for environment '$ENV_ID':"
-          jq '.context["'${ENV_ID}'"].tags' cdk.json
-
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+      - name: Run CDK synth and capture CDK Nag output
+        run: |
+          set -o pipefail
+          cdk synth --context env=${{ env.ENV_ID }} --output cdk.out 2>&1 | tee synth.log
+
+      - name: Upload CDK Nag synth log to S3
+        if: always()
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp synth.log s3://${{ env.BUCKET_NAME }}/nag-log-${{ env.ENV_ID }}-${SHORT_SHA}.log --region ${{ env.AWS_REGION }}
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3 bucket with short commit SHA
+      - name: Upload CDK project zip to S3
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
