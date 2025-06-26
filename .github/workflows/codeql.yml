@@ -62,16 +62,25 @@ jobs:
       - name: Build Java CDK project
         run: mvn clean install
 
-      - name: Run CDK synth and capture CDK Nag output
+      - name: Run CDK synth with NIST80053 and log output
         run: |
           set -o pipefail
-          cdk synth --context env=${{ env.ENV_ID }} --output cdk.out 2>&1 | tee synth.log
+          (cdk synth --context env=${{ env.ENV_ID }} --output cdk.out || true) 2>&1 | tee synth.log
 
-      - name: Upload CDK Nag synth log to S3
+      - name: Upload CDK Nag synth log to S3 (if exists)
         if: always()
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          aws s3 cp synth.log s3://${{ env.BUCKET_NAME }}/nag-log-${{ env.ENV_ID }}-${SHORT_SHA}.log --region ${{ env.AWS_REGION }}
+          if [ -f synth.log ]; then
+            aws s3 cp synth.log s3://${{ env.BUCKET_NAME }}/nag-log-${{ env.ENV_ID }}-${SHORT_SHA}.log --region ${{ env.AWS_REGION }}
+          else
+            echo "synth.log not found. Skipping upload."
+          fi
+
+      - name: Fail the workflow if CDK synth failed
+        run: |
+          echo "Re-running synth to check for hard failure..."
+          cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
       - name: Zip the CDK project
         run: |
