@@ -2,17 +2,12 @@ name: CDK Deploy Pipeline
 
 on:
   push:
-    branches:
-      - dev
-      - stg
-      - prod
+    branches: [prod, dev, stg]
   pull_request:
-    branches:
-      - dev
-      - stg
-      - prod
+    branches: [prod, dev, stg]
 
 permissions:
+  id-token: write
   contents: read
   actions: write
   pull-requests: write
@@ -21,35 +16,36 @@ jobs:
   synth-and-upload:
     runs-on: ubuntu-latest
 
-    # Run only on these branches
-    if: |
-      (github.ref == 'refs/heads/dev') ||
-      (github.ref == 'refs/heads/stg') ||
-      (github.ref == 'refs/heads/prod')
+    strategy:
+      matrix:
+        include:
+          - branch: dev
+            env_name: dev
+          - branch: stg
+            env_name: stg
+          - branch: prod
+            env_name: prod
+
+    environment: ${{ matrix.env_name }}
 
     env:
+      ENV_ID: ${{ matrix.env_name }}
       AWS_REGION: us-east-1
       BUCKET_NAME: test-1-git
 
     steps:
-      - name: Set environment name
-        run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
-            echo "ENV_ID=dev" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/stg" ]]; then
-            echo "ENV_ID=stg" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == "refs/heads/prod" ]]; then
-            echo "ENV_ID=prod" >> $GITHUB_ENV
-          fi
+      - name: Exit if branch does not match matrix branch
+        if: ${{ github.ref != format('refs/heads/{0}', matrix.branch) }}
+        run: echo "Skipping job as this branch doesn't match matrix.branch" && exit 0
 
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction
+          role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Node.js
@@ -71,17 +67,45 @@ jobs:
       - name: Set up AWS CDK
         run: npm install -g aws-cdk
 
+      - name: Replace version tag in cdk.json and print
+        run: |
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          jq --arg cid "$COMMIT_ID" \
+            '.context["'${ENV_ID}'"].tags |= map(
+              if .key == "version" then .value = $cid else . end
+            )' cdk.json > tmp.json && mv tmp.json cdk.json
+          echo "Updated version tag for environment '$ENV_ID':"
+          jq '.context["'${ENV_ID}'"].tags' cdk.json
+
       - name: Build Java CDK project
         run: mvn clean install
 
       - name: Run CDK synth
-        run: cdk synth --context env=${{ env.ENV_ID }}
+        run: cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
+
+      - name: Install CDK Nag CLI
+        run: npm install -g @cdklabs/cdk-nag-cli
+
+      - name: Run CDK Nag (NIST80053R5) and generate CSV
+        run: |
+          echo "Running CDK Nag on synthesized templates..."
+          > nag-report.csv
+          for file in $(find cdk.out -name "*.template.json"); do
+            echo "Checking: $file"
+            cdk-nag-cli --template "$file" --nag-pack NIST80053R5 --output-format csv --output-path nag-report.csv || exit 1
+          done
+
+      - name: Upload CDK Nag CSV report to S3
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp nag-report.csv s3://${{ env.BUCKET_NAME }}/nag-report-${{ env.ENV_ID }}-${SHORT_SHA}.csv --region ${{ env.AWS_REGION }}
 
       - name: Zip the CDK project
         run: |
           zip -r cdk-project.zip . -x ".git/*" ".github/*"
           ls -lh cdk-project.zip
 
-      - name: Upload to S3
+      - name: Upload CDK project zip to S3
         run: |
-          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}.zip --region $AWS_REGION
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          aws s3 cp cdk-project.zip s3://${{ env.BUCKET_NAME }}/cdk-project-${{ env.ENV_ID }}-${SHORT_SHA}.zip --region ${{ env.AWS_REGION }}
