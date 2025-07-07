@@ -47,7 +47,6 @@ jobs:
       - name: Install CDK & Build
         run: |
           npm install -g aws-cdk
-          npm install
           mvn clean install
 
       - name: CDK Synth
