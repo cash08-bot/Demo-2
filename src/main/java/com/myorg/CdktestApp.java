@@ -7,7 +7,7 @@ import software.constructs.Construct;
 import software.amazon.awscdk.Aspects;
 
 // 🔒 Import CDK Nag
-import io.cdk.nag.packs.NIST80053R5Checks;
+//import io.cdk.nag.packs.NIST80053R5Checks;
 
 public class CdktestApp {
     public static void main(final String[] args) {
