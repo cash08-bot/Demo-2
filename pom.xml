@@ -58,12 +58,5 @@
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
-
-        <!-- ✅ CDK Nag for compliance checks like NIST 800-53 -->
-        <dependency>
-            <groupId>io.cdk</groupId>
-            <artifactId>cdk-nag</artifactId>
-            <version>${cdk.nag.version}</version>
-        </dependency>
     </dependencies>
 </project>
