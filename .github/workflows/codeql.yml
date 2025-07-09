@@ -2,7 +2,7 @@ name: CDK Synth (PR Review)
 
 on:
   pull_request:
-    branches: [prod, dev, stg]
+    branches: [dev, stg]  # Removed prod
 
 permissions:
   contents: read
@@ -19,8 +19,6 @@ jobs:
             env_name: dev
           - branch: stg
             env_name: stg
-          - branch: prod
-            env_name: prod
 
     environment: ${{ matrix.env_name }}
 
@@ -54,7 +52,7 @@ jobs:
           echo "Running CDK Synth for $ENV_ID"
           cdk synth --context env=${{ env.ENV_ID }} --output cdk.out
 
-      - name: Upload Synth Output (optional)
+      - name: Upload Synth Output
         uses: actions/upload-artifact@v4
         with:
           name: cdk-synth-${{ env.ENV_ID }}
