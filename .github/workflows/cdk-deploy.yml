@@ -2,7 +2,7 @@ name: CDK Deploy (Auto after PR merge)
 
 on:
   push:
-    branches: [prod, dev, stg]
+    branches: [dev, stg]  # Removed prod
 
 permissions:
   id-token: write
@@ -17,10 +17,10 @@ jobs:
         include:
           - branch: dev
             env_name: dev
+            role_arn: arn:aws:iam::614056699201:role/Cdk-deploy-dev-demo
           - branch: stg
             env_name: stg
-          - branch: prod
-            env_name: prod
+            role_arn: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
 
     environment: ${{ matrix.env_name }}
 
@@ -38,7 +38,7 @@ jobs:
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::381492133980:role/GitHubAction-AssumeRoleWithAction.
+          role-to-assume: ${{ matrix.role_arn }}
           role-session-name: Github-Role
           aws-region: ${{ env.AWS_REGION }}
 
